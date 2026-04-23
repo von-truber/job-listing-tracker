@@ -1,0 +1,41 @@
+name: Job Listing Tracker
+
+# Runs automatically every day at 08:00 UTC.
+# Can also be triggered manually from the Actions tab in GitHub.
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+jobs:
+  check-listings:
+    name: Check job listing availability
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write Google credentials file
+        run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
+
+      - name: Write config file
+        run: |
+          cat > config.py << 'EOF'
+          SHEET_ID             = "${{ secrets.SHEET_ID }}"
+          SERVICE_ACCOUNT_FILE = "credentials.json"
+          GMAIL_ADDRESS        = "${{ secrets.GMAIL_ADDRESS }}"
+          GMAIL_APP_PASSWORD   = "${{ secrets.GMAIL_APP_PASSWORD }}"
+          ALERT_EMAIL          = "${{ secrets.ALERT_EMAIL }}"
+          EOF
+
+      - name: Run job tracker
+        run: python job_tracker.py
