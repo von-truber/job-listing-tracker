@@ -1,0 +1,12 @@
+# Private credentials — never commit these
+credentials.json
+config.py
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment files
+.env
+*.env
