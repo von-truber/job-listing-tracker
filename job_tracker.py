@@ -17,18 +17,15 @@ Schedule this script via PythonAnywhere's task scheduler or GitHub Actions.
 """
 
 import re
+import smtplib
 import time
 from datetime import datetime, timezone
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 import gspread
 import requests
 from bs4 import BeautifulSoup
-from google.oauth2.service_account import Credentials
-
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-
 from config import (
     ALERT_EMAIL,
     GMAIL_ADDRESS,
@@ -36,26 +33,29 @@ from config import (
     SERVICE_ACCOUNT_FILE,
     SHEET_ID,
 )
+from google.oauth2.service_account import Credentials
 
 # ---------------------------------------------------------------------------
 # Column positions (0-based, matching sheet order)
 # A=0  B=1  C=2  D=3  E=4  F=5  G=6
 # ---------------------------------------------------------------------------
-COL_COMPANY       = 0
-COL_TITLE         = 1
-COL_URL           = 2
-COL_DATE_ADDED    = 3
-COL_LAST_CHECKED  = 4   # written by this script
-COL_STATUS        = 5   # written by this script
-COL_NOTES         = 6
+COL_COMPANY = 0
+COL_TITLE = 1
+COL_URL = 2
+COL_DATE_ADDED = 3
+COL_LAST_CHECKED = 4  # written by this script
+COL_STATUS = 5  # written by this script
+COL_NOTES = 6
 
 # Keywords that suggest an apply button or form is still present
 APPLY_KEYWORDS = [
+    "apply",
     "apply now",
     "apply for this",
     "apply today",
     "submit application",
     "apply to this job",
+    "apply for this job",
     "apply to this position",
 ]
 
@@ -91,6 +91,7 @@ REQUEST_DELAY = 2
 # Google Sheets helpers
 # ---------------------------------------------------------------------------
 
+
 def get_sheet():
     """Authenticate with the Google Sheets API and return the first sheet."""
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -102,6 +103,7 @@ def get_sheet():
 # ---------------------------------------------------------------------------
 # Platform detection
 # ---------------------------------------------------------------------------
+
 
 def detect_platform(url: str) -> str:
     """
@@ -122,6 +124,7 @@ def detect_platform(url: str) -> str:
 # ---------------------------------------------------------------------------
 # Platform-specific API checkers
 # ---------------------------------------------------------------------------
+
 
 def check_workable(url: str) -> str:
     """
@@ -152,7 +155,7 @@ def check_workable(url: str) -> str:
         if r.status_code != 200:
             return "Error"
 
-        data  = r.json()
+        data = r.json()
         state = data.get("state", "").lower().strip()
 
         # If the state is explicitly in the closed set, the role is gone
@@ -193,7 +196,7 @@ def check_ashby(url: str) -> str:
         if r.status_code != 200:
             return "Error"
 
-        data     = r.json()
+        data = r.json()
         postings = data.get("jobPostings", [])
         live_ids = [p.get("id", "").lower() for p in postings]
 
@@ -221,7 +224,7 @@ def check_breezy(url: str) -> str:
             print("  Could not parse Breezy HR URL.")
             return "Error"
 
-        company       = match.group(1)
+        company = match.group(1)
         position_slug = match.group(2)
 
         id_match = re.match(r"([0-9a-f]+)", position_slug, re.IGNORECASE)
@@ -230,7 +233,7 @@ def check_breezy(url: str) -> str:
             return "Error"
 
         position_id = id_match.group(1).lower()
-        api_url     = f"https://{company}.breezy.hr/json"
+        api_url = f"https://{company}.breezy.hr/json"
 
         r = requests.get(api_url, headers=REQUEST_HEADERS, timeout=15)
 
@@ -316,6 +319,7 @@ def check_concentrix(url: str) -> str:
 # Generic checker (fallback for standard company career pages)
 # ---------------------------------------------------------------------------
 
+
 def check_generic(url: str, job_title: str) -> str:
     """
     Fallback for URLs that are not on a known job board platform.
@@ -331,7 +335,7 @@ def check_generic(url: str, job_title: str) -> str:
         if r.status_code >= 400:
             return "Error"
 
-        soup      = BeautifulSoup(r.text, "html.parser")
+        soup = BeautifulSoup(r.text, "html.parser")
         page_text = soup.get_text(separator=" ").lower()
 
         title_present = job_title.lower() in page_text
@@ -355,6 +359,7 @@ def check_generic(url: str, job_title: str) -> str:
 # Main dispatcher: routes each URL to the correct checker
 # ---------------------------------------------------------------------------
 
+
 def check_listing(url: str, job_title: str) -> str:
     """
     Detect the platform and route to the appropriate checker.
@@ -377,6 +382,7 @@ def check_listing(url: str, job_title: str) -> str:
 # ---------------------------------------------------------------------------
 # Email alert
 # ---------------------------------------------------------------------------
+
 
 def send_alert(changes: list) -> None:
     """Send a Gmail alert listing every status change detected."""
@@ -404,8 +410,8 @@ def send_alert(changes: list) -> None:
     body = "\n".join(lines)
 
     msg = MIMEMultipart()
-    msg["From"]    = GMAIL_ADDRESS
-    msg["To"]      = ALERT_EMAIL
+    msg["From"] = GMAIL_ADDRESS
+    msg["To"] = ALERT_EMAIL
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain"))
 
@@ -420,27 +426,30 @@ def send_alert(changes: list) -> None:
 # Main runner
 # ---------------------------------------------------------------------------
 
-def run() -> None:
-    print(f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}] Job Tracker started.")
 
-    sheet    = get_sheet()
+def run() -> None:
+    print(
+        f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}] Job Tracker started."
+    )
+
+    sheet = get_sheet()
     all_rows = sheet.get_all_values()
 
     if len(all_rows) < 2:
         print("Sheet has no data rows. Add some listings and run again.")
         return
 
-    data_rows = all_rows[1:]   # skip header row
-    changes   = []
-    updates   = []             # batched sheet writes
+    data_rows = all_rows[1:]  # skip header row
+    changes = []
+    updates = []  # batched sheet writes
 
     for i, row in enumerate(data_rows):
         # Pad row so we never get an IndexError on sparse sheets
         row = row + [""] * (7 - len(row))
 
-        company    = row[COL_COMPANY].strip()
-        title      = row[COL_TITLE].strip()
-        url        = row[COL_URL].strip()
+        company = row[COL_COMPANY].strip()
+        title = row[COL_TITLE].strip()
+        url = row[COL_URL].strip()
         old_status = row[COL_STATUS].strip()
 
         if not url:
@@ -454,21 +463,25 @@ def run() -> None:
 
         # Sheet row number is i + 2 (1-based index, plus the header row)
         sheet_row = i + 2
-        updates.append({
-            "range":  f"E{sheet_row}:F{sheet_row}",
-            "values": [[checked_at, new_status]],
-        })
+        updates.append(
+            {
+                "range": f"E{sheet_row}:F{sheet_row}",
+                "values": [[checked_at, new_status]],
+            }
+        )
 
         # Only flag a change if there was a previous status to compare against
         if old_status and new_status != old_status:
-            changes.append({
-                "company":    company,
-                "title":      title,
-                "url":        url,
-                "old_status": old_status,
-                "new_status": new_status,
-                "checked_at": checked_at,
-            })
+            changes.append(
+                {
+                    "company": company,
+                    "title": title,
+                    "url": url,
+                    "old_status": old_status,
+                    "new_status": new_status,
+                    "checked_at": checked_at,
+                }
+            )
 
         time.sleep(REQUEST_DELAY)
 
