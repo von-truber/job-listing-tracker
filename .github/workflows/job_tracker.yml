@@ -38,4 +38,4 @@ jobs:
           EOF
 
       - name: Run job tracker
-        run: python diagnose.py
+        run: python job_tracker.py
