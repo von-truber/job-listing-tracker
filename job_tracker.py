@@ -398,7 +398,7 @@ def send_alert(changes: list) -> None:
 
     msg = MIMEMultipart()
     msg["From"]    = GMAIL_ADDRESS
-    msg["To"]      = ALERT_EMAIL
+    msg["To"]      = ", ".join(ALERT_EMAIL)
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain"))
 
