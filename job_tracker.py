@@ -1,6 +1,10 @@
 """
 job_tracker.py
 --------------
+STATUS: PAUSED. The tracker is disconnected from the Google Sheet
+(SHEET_ENABLED = False) and the workflow's daily schedule is off. Alert
+emails, when enabled, go to the single address in the ALERT_EMAIL secret.
+
 Reads opportunity listings from a Google Sheet, checks whether each listing
 URL is still active, writes status back to the sheet, and sends a Gmail
 alert for any listings that have changed status since the last run.
@@ -37,17 +41,22 @@ from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-import gspread
 import requests
 from bs4 import BeautifulSoup
 from config import (
     ALERT_EMAIL,
     GMAIL_ADDRESS,
     GMAIL_APP_PASSWORD,
-    SERVICE_ACCOUNT_FILE,
-    SHEET_ID,
 )
-from google.oauth2.service_account import Credentials
+
+# ---------------------------------------------------------------------------
+# Sheet connection
+# The tracker is currently disconnected from the Google Sheet. While this is
+# False the script does not authenticate with Google, read any rows, or write
+# anything back. To reconnect: set this to True, restore the credentials and
+# SHEET_ID steps in the workflow, and re-add gspread/google-auth.
+# ---------------------------------------------------------------------------
+SHEET_ENABLED = False
 
 # ---------------------------------------------------------------------------
 # Column positions (0-based)
@@ -112,6 +121,10 @@ REQUEST_DELAY = 2
 
 def get_sheet():
     """Authenticate with the Google Sheets and Drive APIs and return sheet1."""
+    import gspread
+    from config import SERVICE_ACCOUNT_FILE, SHEET_ID
+    from google.oauth2.service_account import Credentials
+
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
@@ -365,16 +378,19 @@ def send_alert(changes: list) -> None:
     if not changes:
         return
 
-    # FIX: normalise ALERT_EMAIL to a list regardless of how it is stored in
-    # config.py. The GitHub secret may be a comma-separated string
-    # ("a@gmail.com,b@gmail.com") or a Python list. Both are handled here.
+    # Alerts go to ONE address only (the ALERT_EMAIL secret). If the secret
+    # holds more than one address the email is not sent at all, so no one
+    # else can be added to the alert list by accident.
     if isinstance(ALERT_EMAIL, list):
         recipients = [e.strip() for e in ALERT_EMAIL if e.strip()]
     else:
-        recipients = [e.strip() for e in str(ALERT_EMAIL).split(",") if e.strip()]
+        recipients = [e.strip() for e in re.split(r"[,;\s]+", str(ALERT_EMAIL)) if e.strip()]
 
-    if not recipients:
-        print("No valid recipients in ALERT_EMAIL. Skipping email.")
+    if len(recipients) != 1:
+        print(
+            f"ALERT_EMAIL must contain exactly one address (found {len(recipients)}). "
+            "Skipping email."
+        )
         return
 
     subject = f"Opportunity Tracker: {len(changes)} listing(s) changed status"
@@ -401,7 +417,7 @@ def send_alert(changes: list) -> None:
 
     msg = MIMEMultipart()
     msg["From"] = GMAIL_ADDRESS
-    msg["To"] = ", ".join(recipients)
+    msg["To"] = recipients[0]
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain"))
 
@@ -409,7 +425,7 @@ def send_alert(changes: list) -> None:
         server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
         server.sendmail(GMAIL_ADDRESS, recipients, msg.as_string())
 
-    print(f"Alert email sent to {len(recipients)} recipient(s) for {len(changes)} change(s).")
+    print(f"Alert email sent for {len(changes)} change(s).")
 
 
 # ---------------------------------------------------------------------------
@@ -422,6 +438,10 @@ def run() -> None:
         f"\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}] "
         "Opportunity Tracker started."
     )
+
+    if not SHEET_ENABLED:
+        print("Tracker is paused and disconnected from the Google Sheet. Nothing to check.")
+        return
 
     sheet = get_sheet()
     all_rows = sheet.get_all_values()

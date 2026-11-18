@@ -1,10 +1,13 @@
 name: Job Listing Tracker
 
-# Runs automatically every day at 08:00 UTC.
-# Can also be triggered manually from the Actions tab in GitHub.
+# PAUSED: the daily schedule is switched off and the tracker is disconnected
+# from the Google Sheet. A manual run from the Actions tab only prints a
+# "paused" message and exits.
+#
+# To resume, restore the schedule below and the credentials/SHEET_ID steps:
+#   schedule:
+#     - cron: "0 8 * * *"
 on:
-  schedule:
-    - cron: "0 8 * * *"
   workflow_dispatch:
 
 jobs:
@@ -24,14 +27,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Write Google credentials file
-        run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
-
+      # Alerts go to the single address stored in the ALERT_EMAIL secret.
+      # No Google credentials or SHEET_ID are written while the sheet is
+      # disconnected.
       - name: Write config file
         run: |
           cat > config.py << 'EOF'
-          SHEET_ID             = "${{ secrets.SHEET_ID }}"
-          SERVICE_ACCOUNT_FILE = "credentials.json"
           GMAIL_ADDRESS        = "${{ secrets.GMAIL_ADDRESS }}"
           GMAIL_APP_PASSWORD   = "${{ secrets.GMAIL_APP_PASSWORD }}"
           ALERT_EMAIL          = "${{ secrets.ALERT_EMAIL }}"
